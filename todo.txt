@@ -1,0 +1,3 @@
+- Process PayPal and Fidelity statements
+- test suite
+- don't erase previous statements, append new ones using some tool like diff
