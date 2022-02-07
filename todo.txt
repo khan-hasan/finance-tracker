@@ -1,3 +1,8 @@
 - Process PayPal and Fidelity statements
 - test suite
 - don't erase previous statements, append new ones using some tool like diff
+- $7000 publix charge around nov 2021 was deen, but currently categorized as groceries iirc
+- graph total balance (across all accounts) per month
+- ability to edit a transaction description when processing original statement, perhaps store edit in different file so that it is not recognized when 'diff'ed against new statements
+- forecast savings at end of year and determine if a purchase is good or not
+- cap spending per category based on savings goal at end of year

@@ -1,10 +1,10 @@
+import argparse
 import collections
 import csv
 from datetime import datetime
 import os
+from pprint import pprint
 
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 
@@ -26,7 +26,7 @@ def input_category_from_dict(dict_items, writer):
     return category
 
 
-def categorize_transaction(trans_description, amount):
+def categorize_transaction(transaction):
     with open('categories_dict.csv', 'r+', newline='') as csv_file:
         reader = csv.DictReader(csv_file)
         writer = csv.DictWriter(csv_file, fieldnames=['key word', 'category'])
@@ -34,17 +34,17 @@ def categorize_transaction(trans_description, amount):
         categories_set = set()
         for row in reader:
             categories_set.add(row['category'])
-            if row['key word'].lower() in trans_description.lower():
+            if row['key word'].lower() in transaction['Description'].lower():
                 return row['category']
 
         print('====================')
-        print('\n', trans_description, amount)
+        print('\n', pprint(dict(transaction)))
         category = input_category_from_dict(categories_set, writer)
         return category
 
 
 def process_transactions(financial_institutions):
-    # Load statements and combine into a single DataFrame per each financial institution
+    # Combine all statements from all banks into single DataFrame
     combined_transactions = []
     for fin_inst in financial_institutions:
         statement_dir = f'input_statements/{fin_inst}'
@@ -60,12 +60,12 @@ def process_transactions(financial_institutions):
                     if fin_inst.lower() == 'chase':
                         transaction['account'] = statement_file.split('_')[0]
                         transaction['category'] = categorize_transaction(
-                            row['Description'], row['Amount'])
+                            row)
                         transaction['date'] = datetime.strptime(
                             row['Posting Date'], '%m/%d/%Y').strftime('%Y-%m-%d')
                         transaction['description'] = row['Description']
                         transaction['amount'] = float(row['Amount'])
-                        transaction['balance'] = row['Balance']
+                        transaction['balance'] = float(row['Balance'])
 
                     elif fin_inst.lower() == 'unify':
                         transaction['account'] = row['Account Number'].split(
@@ -73,67 +73,93 @@ def process_transactions(financial_institutions):
                         transaction['date'] = datetime.strptime(
                             row['Post Date'], '%m/%d/%Y').strftime('%Y-%m-%d')
                         transaction['description'] = row['Description']
-                        transaction['amount'] = row['Credit'] if row.get(
+                        transaction['amount'] = float(row['Credit']) if row.get(
                             'Credit') else -float(row['Debit'])
                         transaction['category'] = categorize_transaction(
-                            row['Description'], transaction['amount'])
-                        transaction['balance'] = row['Balance']
+                            row)
+                        transaction['balance'] = float(row['Balance'])
 
                     combined_transactions.append(transaction)
 
     with open('all_transactions.csv', 'w', newline='') as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=[
-                                'account', 'date', 'description', 'amount', 'category', 'balance'])
+            'account', 'date', 'description', 'amount', 'category', 'balance'])
         writer.writerows(combined_transactions)
 
         master_statement = pd.read_csv('all_transactions.csv', names=[
             'account', 'date', 'description', 'amount', 'category', 'balance'], parse_dates=['date'])
-        # master_statement['date'] = pd.to_datetime(
-        #     master_statement['date'], format='%m/%d/%y')
-        # print(master_statement)
+
         return master_statement
 
 
-def sum_by_category(statement):
+def analyze(statement):
     pd.set_option('max_rows', None)
 
-    # for verifying that transactions are categorized correctly
-    df = statement.sort_values(['category', 'description'])
+    # Sort transactions by date
+    df = statement.sort_values(['date'], ascending=False)
+    df['month'] = pd.to_datetime(df['date']).dt.strftime('%Y %B')
 
-    df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y %B')
+    # Determine balance per month
+    account_balances = df.sort_values(
+        'date').groupby(['account', 'month'], as_index=False).tail(1)
+    total_balance = account_balances.groupby('month', as_index=False)[
+        'balance'].sum()
 
-    df = df.groupby(['date', 'category']).agg(
-        {'amount': ['sum']}).reset_index()
-
+    # Determine total spending per month per category
+    df = df.groupby(['month', 'category']).sum().reset_index()
     df = pd.pivot_table(df, values='amount', index=[
-                        'date'], columns='category').reset_index()
+        'month'], columns='category').reset_index()
 
-    df.index = pd.to_datetime(df['date'], format='%Y %B')
-    df = df.sort_index()
+    # Set date as index
+    df.index = pd.to_datetime(df['month']).dt.strftime('%Y %B')
+    df.index.name = 'date'
+    df.columns.name = None
 
-    # Remove top level of columns in column hierarchy
-    df.columns = df.columns.get_level_values(1)
+    # Combine data into a single DataFrame
+    df = pd.merge(df, total_balance, left_on='month', right_on='month')
 
-    print(df)
+    # Determine net profit per month
+    # TODO: dynamically retrieve these column names
+    COLS = [
+        'ATM',
+        'bills',
+        'car',
+        'deen',
+        'dining',
+        'education',
+        'entertainment',
+        'groceries',
+        'health',
+        'home',
+        'income',
+        'internal transfer',
+        'rent',
+        'shopping',
+        'taxes',
+        'travel',
+        'uncategorized'
+    ]
+    df['net profit'] = df[COLS].sum(axis=1)
 
-    # Draw graph of finances per category per month
-    # df.plot(x='date', y='sum', kind='bar')
-    # plt.show()
-
-    import pdb
-    pdb.set_trace()
-
-    # Draw graph of net income per month
-    df['total'] = df[['ATM', 'bills', 'car', 'deen', 'rent',
-                      'shopping', 'taxes', 'travel', 'uncategorized']].sum(axis=1)
-
-    # Draw graph of total profit per month
-    df.plot(x='', y='total', kind='bar')
-    plt.show()
+    # TODO: Order data by month
+    df.to_excel("output.xlsx")
 
     return df
 
 
 if __name__ == '__main__':
-    statement = process_transactions(['chase', 'unify'])
-    df = sum_by_category(statement)
+    parser = argparse.ArgumentParser(
+        description='Analyze spending across accounts.')
+    parser.add_argument('action', type=str, choices=[
+                        'analyze', 'edit'], help='an action for the analyzer')
+    args = parser.parse_args()
+
+    if args.action == 'analyze':
+        statement = process_transactions(['chase', 'unify'])
+        df = analyze(statement)
+
+    elif args.action == 'edit':
+        pass
+
+    else:
+        raise Exception

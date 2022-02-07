@@ -2,3 +2,5 @@ all_transactions.csv
 categories_dict.csv
 input_statements/unify/AccountHistory.csv
 input_statements/chase/Chase*
+output.xlsx
+categories_dict.csv
